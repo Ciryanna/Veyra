@@ -18,7 +18,7 @@ const TABS: Array<{ id: Tab; label: string }> = [
 
 export default function App() {
   const [dark, setDark] = useState(() => localStorage.getItem('veyra_theme') !== 'light')
-  const [token, setTok] = useState(getToken())
+  const [token, setTok] = useState(() => getToken())
   const [authed, setAuthed] = useState(false)
   const [authErr, setAuthErr] = useState('')
   const [tab, setTab] = useState<Tab>('dashboard')
@@ -29,29 +29,39 @@ export default function App() {
     localStorage.setItem('veyra_theme', dark ? 'dark' : 'light')
   }, [dark])
 
-  // 已存令牌的启动校验：无效则回到输入页。
+  // 已存令牌的启动校验——只跑一次。
+  // 刻意不依赖 token state：否则用户在输入框每敲一个字符都会触发
+  // 一次校验请求，401 后还会清空输入框，令牌根本输不进去（实测 bug）。
   useEffect(() => {
-    if (!token) return
-    fetch('/admin/api/stats', { headers: { Authorization: `Bearer ${token}` } }).then((r) => {
-      if (r.ok) setAuthed(true)
-      else {
-        clearToken()
-        setTok('')
-        setAuthErr('已保存的令牌无效，请重新输入')
-      }
-    })
-  }, [token])
+    const saved = getToken()
+    if (!saved) return
+    fetch('/admin/api/stats', { headers: { Authorization: `Bearer ${saved}` } })
+      .then((r) => {
+        if (r.ok) setAuthed(true)
+        else {
+          clearToken()
+          setAuthErr('已保存的令牌无效，请重新输入')
+        }
+      })
+      .catch(() => {
+        /* 网络错误：留在输入页让用户重试 */
+      })
+  }, [])
 
   async function submitToken() {
-    const res = await fetch('/admin/api/stats', {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    if (res.ok) {
-      setToken(token)
-      setAuthed(true)
-      setAuthErr('')
-    } else {
-      setAuthErr('令牌无效（VEYRA_ADMIN_TOKEN）')
+    setAuthErr('')
+    try {
+      const res = await fetch('/admin/api/stats', {
+        headers: { Authorization: `Bearer ${token.trim()}` },
+      })
+      if (res.ok) {
+        setToken(token.trim())
+        setAuthed(true)
+      } else {
+        setAuthErr('令牌无效（VEYRA_ADMIN_TOKEN）')
+      }
+    } catch {
+      setAuthErr('网络错误：网关不可达')
     }
   }
 
